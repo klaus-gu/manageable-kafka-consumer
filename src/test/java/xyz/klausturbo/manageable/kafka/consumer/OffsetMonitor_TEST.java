@@ -15,26 +15,30 @@ public class OffsetMonitor_TEST {
     
     @Test
     public void margin_Page_TEST() {
-        OffsetMonitor offsetMonitor = new OffsetMonitor(1, 2);
+        OffsetMonitor offsetMonitor = new OffsetMonitor(2, 2);
         // open first page from 1 - 2.
         offsetMonitor.track(1, 1);
         boolean trackSuccess = offsetMonitor.track(1, 2);
         Assert.assertTrue(trackSuccess);
         
+        // open second page from 3 - 4
+        trackSuccess = offsetMonitor.track(1, 3);
+        Assert.assertTrue(trackSuccess);
+        offsetMonitor.track(1,4);
         // return false when reach monitor pagesize.
-        boolean trackFail = offsetMonitor.track(1, 3);
+        boolean trackFail = offsetMonitor.track(1,5);
         Assert.assertFalse(trackFail);
         
-        OffsetMonitor offsetMonitor2 = new OffsetMonitor(5,2);
+        OffsetMonitor offsetMonitor2 = new OffsetMonitor(2, 2);
         // open first page from  2 - 3
         offsetMonitor2.track(1, 2);
-        offsetMonitor2.track(1,3);
+        offsetMonitor2.track(1, 3);
         // open second page from 4 - 5
-        offsetMonitor2.track(1,4);
-        offsetMonitor2.track(1,5);
+        offsetMonitor2.track(1, 4);
+        offsetMonitor2.track(1, 5);
         
-        OptionalLong offsetToCommit = offsetMonitor2.ack(1,2);
-        OptionalLong offsetToCommit2 = offsetMonitor2.ack(1,3);
+        OptionalLong offsetToCommit = offsetMonitor2.ack(1, 2);
+        OptionalLong offsetToCommit2 = offsetMonitor2.ack(1, 3);
         System.out.println(offsetToCommit);
         System.out.println(offsetToCommit2.getAsLong());
     }

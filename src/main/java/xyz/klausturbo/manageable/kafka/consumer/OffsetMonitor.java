@@ -9,55 +9,106 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 
 /**
- * 位移管理.
+ * Kafka consume offset monitor.
+ * <p>
+ * Each ${@link OffsetMonitor} contains several  ${@link PartitionMonitor} , and each ${@link PartitionMonitor} contains
+ * several ${@link PageMonitor}.
+ * </p>
+ * <p>
  *
+ * </p>
  * @author <a href="mailto:guyue375@outlook.com">Klaus.turbo</a>
  * @program manageable-kafka-consumer
  **/
 public class OffsetMonitor {
     
+    /**
+     * Max size of each page (Offset number it can contains).
+     */
     private final int pageSize;
     
     /**
-     * 一个分区最多分配page的个数
+     * Max pages that each partition contains .
      */
     private final int maxOpenPagesPerPartition;
     
-    private final Map<Integer/*partition id*/, PartitionMonitor> partitionMonitors;
+    /**
+     * Relationship of partition and ${@link PartitionMonitor} .
+     * <p>
+     * PartitionId = ${@link PartitionMonitor}
+     * </p>
+     */
+    private final Map<Integer, PartitionMonitor> partitionMonitors;
     
+    /**
+     * Constrauctor.
+     * @param pageSize                 Size of each page.
+     * @param maxOpenPagesPerPartition Max number of page that each ${@link PartitionMonitor} can open.
+     */
     public OffsetMonitor(int pageSize, int maxOpenPagesPerPartition) {
         this.pageSize = pageSize;
         this.maxOpenPagesPerPartition = maxOpenPagesPerPartition;
         this.partitionMonitors = new HashMap<>();
     }
     
+    /**
+     * reset .
+     */
     public void reset() {
         partitionMonitors.clear();
     }
     
+    /**
+     * track offset for a specific partition.
+     * @param partition partition id.
+     * @param offset    offset .
+     * @return
+     */
     public boolean track(int partition, long offset) {
         return partitionMonitors.computeIfAbsent(partition, key -> new PartitionMonitor(offset)).track(offset);
     }
     
+    /**
+     * Confirm which offset the current partition consumes.
+     * @param partition partition id.
+     * @param offset    offset the current partition consumes.
+     * @return
+     */
     public OptionalLong ack(int partition, long offset) {
-        PartitionMonitor partitionTracker = partitionMonitors.get(partition);
-        if (partitionTracker == null) {
+        PartitionMonitor partitionMonitor = partitionMonitors.get(partition);
+        if (partitionMonitor == null) {
             return OptionalLong.empty();
         }
-        return partitionTracker.ack(offset);
+        return partitionMonitor.ack(offset);
     }
     
+    /**
+     * Partition Monitor.
+     * <p>
+     * Each partition contains a single ${@link PartitionMonitor}.
+     * </p>
+     * <p>
+     * Each ${@link PartitionMonitor} contains several ${@link PageMonitor}.
+     * </p>
+     */
     private class PartitionMonitor {
         
+        /**
+         * pageIndex : ----0-----1-----2---.
+         * <p>
+         * pageMonitor : [0,1] [2,3] [4,5].
+         */
         private final Map<Long/*page index*/, PageMonitor> pageMonitors = new HashMap<>();
         
         /**
-         * 已经完成的页面（即：被追踪，并且全部已经确认）利用treeset排序
+         * page index that has been tracked and already completed .
+         * <p>
+         * Use ${@link TreeSet} to sort.
          */
         private final SortedSet<Long /*page index*/> completedPages = new TreeSet<>();
         
         /**
-         * 最后一个连续的页面下标
+         * The last consecutive page index.
          */
         private long lastConsecutivePageIndex;
         
@@ -71,14 +122,14 @@ public class OffsetMonitor {
          */
         private long lastTrackedOffset;
         
-        private volatile int openPagesSize = 0;
-        
-        private volatile int completedPagesSize = 0;
-        
+        /**
+         * Constructor.
+         * @param initialOffset first offset for this monitor.
+         */
         public PartitionMonitor(long initialOffset /* begin offset of this partition */) {
             openNewPageForOffset(initialOffset);
             lastConsecutivePageIndex = offsetToPage(initialOffset) - 1;
-            // 最后一个被追踪的位移下标
+            // last tracked offset for this monitor.
             lastTrackedOffset = initialOffset - 1;
         }
         
@@ -86,48 +137,50 @@ public class OffsetMonitor {
             if ((pageMonitors.size() + completedPages.size()) >= maxOpenPagesPerPartition) {
                 return false;
             }
-            // offset 属于哪一个 page
+            // figure out the index of the new page .
             long pageIndex = offsetToPage(offset);
-            // offset 在 page 的哪个位置
+            // figure out the position of this offset in page.
+            // By this step , figure out the margin
             int margin = offsetToPageOffset(offset);
             pageMonitors.put(pageIndex, new PageMonitor(pageSize, margin));
-            openPagesSize = pageMonitors.size();
             lastOpenedPageIndex = pageIndex;
             return true;
         }
         
         boolean track(long offset) {
-            // 获取这个下标应该在哪一个 分区page之中
+            // figure out where this offset should be placed .
             long pageIndex = offsetToPage(offset);
-            // 正常情况，位移按顺序提交过来
-            // 顺序消息
+            /* Condition ONE */
+            // Message come orderly.
             if (offset - lastTrackedOffset == 1) {
-                // pageindex 超过 最后新增的pageindex 并且 已经新增不了 page 给这个 offset了，则返回false
+                // In this loop , this PartitionMonitor is already full and meet the MaxOpenPageSize.
                 if (pageIndex > lastOpenedPageIndex && !openNewPageForOffset(offset)) {
                     return false;
                 }
                 lastTrackedOffset = offset;
                 return true;
             }
-            // 重复的消息
+            /* Condition TWO */
+            // Old message comes.
             if (offset <= lastTrackedOffset) {
                 return true;
             }
-            // 我们看到了一个大于预期的位移，并且存在一个缺口。
-            // 我们的反应是：我们填补了这个空白，并假设丢失的记录之前已经确认。我们已经处理包括一下所有的可能，间隙仅在最后一页，或者间隙包括新页。
-            // 消息缺失
+            /* Condition THREE */
+            // Lack of message before this offset.
             final PageMonitor lastPage = pageMonitors.get(lastOpenedPageIndex);
-            // 走到这了，说明 offset 在最后一个 page 并且，当前 offset - lastTrackedOffset > 1(即中间产生了空缺)
+            // When code goes here , means ( offset - lastTrackedOffset > 1 ) and this offset belongs to the last page.
+            // Lack of message between current offset and lastTrackedOffset.
             if (pageIndex == lastOpenedPageIndex) {
-                // 直接假设中间缺失的部分都已经处理确认过了
+                // Assume that the lacked message has already been handled.
                 lastPage.bulkAck(offsetToPageOffset(lastTrackedOffset + 1), offsetToPageOffset(offset));
                 return true;
             }
             
+            // Page index that happens offset gap.
             final long lastPageIndexBeforeGap = lastOpenedPageIndex;
-            
+            // Last offset before the offset gap.
             final long lastOffsetBeforeGap = lastTrackedOffset;
-            
+            // Try to open a new page to place this offset.
             if (!openNewPageForOffset(offset)) {
                 return false;
             }
@@ -138,33 +191,30 @@ public class OffsetMonitor {
                 }
             }
             completedPages.clear();
-            completedPagesSize = 0;
             lastConsecutivePageIndex = lastOpenedPageIndex - 1;
             lastTrackedOffset = offset;
             return true;
         }
         
         OptionalLong ack(long offset) {
-            // Tell the corresponding page tracker that this offset is acked.
+            // Tell the corresponding page monitor that this offset is acked.
             long pageIndex = offsetToPage(offset);
-            PageMonitor pageTracker = pageMonitors.get(pageIndex);
-            if (pageTracker == null) {
+            PageMonitor pageMonitor = pageMonitors.get(pageIndex);
+            if (pageMonitor == null) {
                 return OptionalLong.empty();
             }
             int pageOffset = offsetToPageOffset(offset);
-            if (!pageTracker.ack(pageOffset)) {
+            if (!pageMonitor.ack(pageOffset)) {
                 return OptionalLong.empty();
             }
             
             // If the page is completed (all offsets in the page is acked), add the pages to the
             // list of completed pages.
             pageMonitors.remove(pageIndex);
-            openPagesSize = pageMonitors.size();
             if (pageIndex <= lastConsecutivePageIndex) {
                 return OptionalLong.empty();
             }
             completedPages.add(pageIndex);
-            completedPagesSize = completedPages.size();
             
             // See whether the completed pages, construct a consecutive chain.
             int numConsecutive = 0;
@@ -191,7 +241,6 @@ public class OffsetMonitor {
                 iterator.next();
                 iterator.remove();
             }
-            completedPagesSize = completedPages.size();
             return OptionalLong.of(pageToFirstOffset(lastConsecutivePageIndex + 1));
         }
         
@@ -202,7 +251,6 @@ public class OffsetMonitor {
         /**
          * 将指定的 offset，投放到指定的 page 中去 例如一个 partition 有 3 个 page 。 0        1         2 P0：[0 100]-[101 200]-[201 300] 则
          * offset=128  一定在下标为 1 的page中间，即属于 101-200 的区间内 所以 使用 offset/pagesize = 128/100 = 1 即落入 page 1
-         *
          * @param offset
          * @return
          */
@@ -212,7 +260,6 @@ public class OffsetMonitor {
         
         /**
          * 一个位移在page中的位置，偏移是多少
-         *
          * @param offset
          * @return
          */
@@ -222,7 +269,7 @@ public class OffsetMonitor {
     }
     
     /**
-     * .
+     * ${@link PageMonitor}  bind to a partition.
      **/
     private class PageMonitor {
         
@@ -238,6 +285,10 @@ public class OffsetMonitor {
         
         /**
          * The effective size of this page , and also means the capacity of the bitset .
+         * <p>
+         * Number of offset this monitor can still accept.
+         * <p>
+         * effectiveSize = size - margin.
          **/
         private final int effectiveSize;
         
@@ -246,10 +297,16 @@ public class OffsetMonitor {
          **/
         private int firstUnackedOffset;
         
+        /**
+         * Constructor.
+         * @param size   capacity of this page.
+         * @param margin means the first offset in this monitor.
+         */
         public PageMonitor(int size, int margin) {
             this.margin = margin;
             this.effectiveSize = size - margin;
             this.firstUnackedOffset = 0;
+            // init a assigned BitSet
             this.bits = new BitSet(effectiveSize);
         }
         
@@ -257,20 +314,28 @@ public class OffsetMonitor {
             return margin;
         }
         
+        /**
+         * acknowledge the offset in this page
+         * <p>
+         * mark the assigned position true.
+         * @param offset offset .
+         * @return
+         */
         boolean ack(int offset) {
+            // means old message comes.
             if (offset < margin) {
                 return false;
             }
-            // Set the bit representing this offset.
+            // figure out the offset's position in this page.
             int effectiveOffset = offset - margin;
-            // 设置指定索引的位为 true
+            // set true for this offset's position in the page.
             bits.set(effectiveOffset);
-            // Find number of consecutive offsets which are acked starting from margin.
+            // find number of consecutive offsets which are acked starting from margin.
             if (effectiveOffset == firstUnackedOffset) {
-                // bits.nextClearBit 找到第一个设置为false的位的索引
+                // bits.nextClearBit find the first false position after firstUnackedOffset
                 firstUnackedOffset = bits.nextClearBit(firstUnackedOffset);
             }
-            // Return true if all expected offsets are acked.
+            // return true if all expected offsets are acked.
             return (firstUnackedOffset == effectiveSize);
         }
         
