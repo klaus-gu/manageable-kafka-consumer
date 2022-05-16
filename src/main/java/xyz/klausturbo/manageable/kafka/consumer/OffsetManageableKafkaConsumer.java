@@ -37,7 +37,6 @@ import static org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_INTERVAL
 
 /**
  * ${@link KafkaConsumer} A KafkaConsumer manage all workers.
- *
  * @author <a href="mailto:guyue375@outlook.com">Klaus.turbo</a>
  * @program dc-log-collect
  **/
@@ -147,7 +146,7 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
     }
     
     /**
-     * 提交一次处理过后的下标.
+     * Ack one handled offset.
      **/
     public void ack(PartitionOffset partitionOffset) {
         unappliedAcks.add(partitionOffset);
@@ -192,6 +191,14 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
         }
     }
     
+    /**
+     * init a thread ,polling messages from kafka .
+     * <p>
+     * 1. handle offset acknowledge.
+     * <p>
+     * 2. put message into inner queue <queuedRecords>.
+     * @return
+     */
     private Thread initConsumerThread() {
         return new Thread(() -> {
             while (!stop) {
@@ -216,6 +223,9 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
             return;
         }
         List<PartitionOffset> offsets = new ArrayList<>(size);
+        
+        // put number=size element into offsets above.
+        // number = size ,means all message.
         unappliedAcks.drainTo(offsets, size);
         Map<TopicPartition, OffsetAndMetadata> offsetsToCommit = new HashMap<>();
         for (PartitionOffset partitionOffset : offsets) {
@@ -240,16 +250,18 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
                 Thread.sleep(1);
                 keepConnectionAlive();
             }
-            // 若缓冲队列没有添加成功，则进入循环
+            // put message into queue first.
             while (!queuedRecords.offer(record)) {
                 handleAcks();
                 Thread.sleep(1);
-                // 维持与kafka的通讯
                 keepConnectionAlive();
             }
         }
     }
     
+    /**
+     * maintain the connection .
+     */
     private void keepConnectionAlive() {
         if (System.currentTimeMillis() - lastPollTime < (int) (0.7 * maxPollIntervalMillis)) {
             return;
@@ -257,7 +269,7 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
         boolean rebalanceHappened = true;
         while (rebalanceHappened) {
             List<TopicPartition> copyOfAssignedPartitions = new ArrayList<>(assignedPartitions);
-            // 暂停消费.
+            // stop consume.
             kafkaConsumer.pause(copyOfAssignedPartitions);
             rebalanceHappened = false;
             lastPollTime = System.currentTimeMillis();

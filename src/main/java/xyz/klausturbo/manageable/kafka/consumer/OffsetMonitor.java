@@ -113,12 +113,12 @@ public class OffsetMonitor {
         private long lastConsecutivePageIndex;
         
         /**
-         * 最后一个打开的页面下标 打开的意思是追踪了offset，但是还没有被确认
+         * last opened page index.
          */
         private long lastOpenedPageIndex;
         
         /**
-         * 最后一个被追踪的下标 offset
+         * last tracked offset.
          */
         private long lastTrackedOffset;
         
@@ -184,6 +184,8 @@ public class OffsetMonitor {
             if (!openNewPageForOffset(offset)) {
                 return false;
             }
+            // When code goes here , means offset is not in last page ,and new page has been created for this offset.
+            // so fill the last page and
             if (lastPage != null) {
                 boolean completed = lastPage.bulkAck(offsetToPageOffset(lastOffsetBeforeGap + 1), pageSize);
                 if (completed) {
@@ -195,7 +197,12 @@ public class OffsetMonitor {
             lastTrackedOffset = offset;
             return true;
         }
-        
+    
+        /**
+         *
+         * @param offset
+         * @return next offset can be ack,empty if there is no offset in next page.
+         */
         OptionalLong ack(long offset) {
             // Tell the corresponding page monitor that this offset is acked.
             long pageIndex = offsetToPage(offset);
@@ -248,19 +255,14 @@ public class OffsetMonitor {
             return pageIndex * pageSize;
         }
         
-        /**
-         * 将指定的 offset，投放到指定的 page 中去 例如一个 partition 有 3 个 page 。 0        1         2 P0：[0 100]-[101 200]-[201 300] 则
-         * offset=128  一定在下标为 1 的page中间，即属于 101-200 的区间内 所以 使用 offset/pagesize = 128/100 = 1 即落入 page 1
-         * @param offset
-         * @return
-         */
+     
         private long offsetToPage(long offset) {
             return offset / pageSize;
         }
-        
+    
         /**
-         * 一个位移在page中的位置，偏移是多少
-         * @param offset
+         * figure out the offset of this offset in current page.
+         * @param offset offset
          * @return
          */
         private int offsetToPageOffset(long offset) {
@@ -332,7 +334,7 @@ public class OffsetMonitor {
             bits.set(effectiveOffset);
             // find number of consecutive offsets which are acked starting from margin.
             if (effectiveOffset == firstUnackedOffset) {
-                // bits.nextClearBit find the first false position after firstUnackedOffset
+                // bits.nextClearBit ：find the first false position after firstUnackedOffset
                 firstUnackedOffset = bits.nextClearBit(firstUnackedOffset);
             }
             // return true if all expected offsets are acked.

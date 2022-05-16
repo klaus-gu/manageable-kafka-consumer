@@ -7,11 +7,27 @@ import java.util.OptionalLong;
 
 /**
  * ${@link OffsetMonitor} .
- *
  * @author <a href="mailto:guyue375@outlook.com">Klaus.turbo</a>
  * @program manageable-kafka-consumer
  **/
 public class OffsetMonitor_TEST {
+    
+    @Test
+    public void disordered_Ack_Offset_TEST() {
+        final OffsetMonitor offsetMonitor = new OffsetMonitor(4, 2);
+        offsetMonitor.track(1, 0);
+        offsetMonitor.track(1, 1);
+        offsetMonitor.track(1, 2);
+        offsetMonitor.track(1, 3);
+        
+        offsetMonitor.ack(1, 2);
+        offsetMonitor.ack(1, 3);
+        offsetMonitor.ack(1, 1);
+        OptionalLong optionalLong = offsetMonitor.ack(1, 0);
+        Assert.assertTrue(optionalLong.isPresent());
+        Assert.assertEquals(4, optionalLong.getAsLong());
+        
+    }
     
     @Test
     public void margin_Page_TEST() {
@@ -24,9 +40,9 @@ public class OffsetMonitor_TEST {
         // open second page from 3 - 4
         trackSuccess = offsetMonitor.track(1, 3);
         Assert.assertTrue(trackSuccess);
-        offsetMonitor.track(1,4);
+        offsetMonitor.track(1, 4);
         // return false when reach monitor pagesize.
-        boolean trackFail = offsetMonitor.track(1,5);
+        boolean trackFail = offsetMonitor.track(1, 5);
         Assert.assertFalse(trackFail);
         
         OffsetMonitor offsetMonitor2 = new OffsetMonitor(2, 2);
