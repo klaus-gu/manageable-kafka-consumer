@@ -1,4 +1,4 @@
-package xyz.klausturbo.manageable.kafka.consumer;
+package xyz.klausturbo.manageable.kafka;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

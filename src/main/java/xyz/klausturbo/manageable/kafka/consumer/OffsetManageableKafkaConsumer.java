@@ -11,6 +11,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.WakeupException;
 import org.slf4j.Logger;
+import xyz.klausturbo.manageable.kafka.util.LogUtil;
 
 import java.io.Closeable;
 import java.io.IOException;

@@ -1,4 +1,4 @@
-package xyz.klausturbo.manageable.kafka.consumer;
+package xyz.klausturbo.manageable.kafka.util;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

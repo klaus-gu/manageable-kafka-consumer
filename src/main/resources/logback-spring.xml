@@ -22,11 +22,11 @@
             </pattern>
         </encoder>
         <!-- 日志过滤-->
-        <filter class="com.ovopark.smart.offset.commit.kafka.util.KafkaConsumerLogFilter">
-            <threadName>main</threadName>
-            <onMatch>TRUE</onMatch>
-            <onMissMatch>FALSE</onMissMatch>
-        </filter>
+<!--        <filter class="com.ovopark.smart.offset.commit.kafka.util.KafkaConsumerLogFilter">-->
+<!--            <threadName>main</threadName>-->
+<!--            <onMatch>TRUE</onMatch>-->
+<!--            <onMissMatch>FALSE</onMissMatch>-->
+<!--        </filter>-->
     </appender>
     
         <appender name="ASYNC" class="ch.qos.logback.classic.AsyncAppender">
