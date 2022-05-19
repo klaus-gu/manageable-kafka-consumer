@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
@@ -32,6 +33,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeoutException;
 
+import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG;
@@ -45,7 +47,7 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
     
     private static final Logger LOGGER = LogUtil.getLogger(OffsetManageableKafkaConsumer.class);
     
-    private static final int POLL_TIMEOUT_MILLIS = 10;
+    private static final int POLL_TIMEOUT_MILLIS = 100;
     
     private final KafkaConsumer<K, V> kafkaConsumer;
     
@@ -79,11 +81,15 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
     
     private volatile boolean stop = false;
     
-    public OffsetManageableKafkaConsumer(Properties kafkaConsumerProperties) {
+    private volatile List<TopicPartition> pauseTopicPartitions = new LinkedList<>();
+    
+    private volatile List<TopicPartition> resumeTopicPartitions = new LinkedList<>();
+    
+    protected OffsetManageableKafkaConsumer(Properties kafkaConsumerProperties) {
         this(kafkaConsumerProperties, 10_000, 1000, 10_000);
     }
     
-    public OffsetManageableKafkaConsumer(Properties kafkaConsumerProperties, int offsetMonitorPageSize,
+    protected OffsetManageableKafkaConsumer(Properties kafkaConsumerProperties, int offsetMonitorPageSize,
             int offsetMonitorMaxOpenPagesPerPartition, int maxQueuedRecords) {
         if (kafkaConsumerProperties.containsKey(MAX_POLL_INTERVAL_MS_CONFIG)) {
             maxPollIntervalMillis = Integer.parseInt(kafkaConsumerProperties.getProperty(MAX_POLL_INTERVAL_MS_CONFIG));
@@ -135,25 +141,36 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
         };
     }
     
-    public void subscribe(String topic) {
+    protected OffsetManageableKafkaConsumer<K, V> subscribe(String topic) {
         subscribe(topic, null);
+        return this;
     }
     
-    public void subscribe(String topic, ConsumerRebalanceListener rebalanceListener) {
+    protected OffsetManageableKafkaConsumer<K, V> subscribe(String topic, ConsumerRebalanceListener rebalanceListener) {
         this.rebalanceListener = rebalanceListener;
         kafkaConsumer.subscribe(Collections.singleton(topic), internalRebalanceListener);
         this.topic = topic;
         thread.setName("kafka-consumer-for-" + topic);
+        return this;
+    }
+    
+    public OffsetManageableKafkaConsumer<K, V> assign(String topic, List<Integer> partitions) {
+        List<TopicPartition> topicPartitions = new ArrayList<>();
+        partitions.forEach(p -> topicPartitions.add(new TopicPartition(topic, p)));
+        kafkaConsumer.assign(topicPartitions);
+        thread.setName("kafka-consumer-for-" + topic);
+        this.topic = topic;
+        return this;
     }
     
     /**
      * Ack one handled offset.
      **/
-    public void ack(PartitionOffset partitionOffset) {
+    protected void ack(PartitionOffset partitionOffset) {
         unappliedAcks.add(partitionOffset);
     }
     
-    public void start() throws InterruptedException, IOException {
+    protected OffsetManageableKafkaConsumer<K, V> start() throws InterruptedException, IOException {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             executor.submit(() -> {
@@ -170,9 +187,10 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
             executor.shutdown();
         }
         thread.start();
+        return this;
     }
     
-    public ConsumerRecord<K, V> poll() {
+    protected ConsumerRecord<K, V> poll() {
         return queuedRecords.poll();
     }
     
@@ -204,6 +222,8 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
         return new Thread(() -> {
             while (!stop) {
                 try {
+                    checkResume();
+                    checkPause();
                     handleAcks();
                     lastPollTime = System.currentTimeMillis();
                     putRecordsInQueue(kafkaConsumer.poll(Duration.ofMillis(POLL_TIMEOUT_MILLIS)));
@@ -224,7 +244,6 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
             return;
         }
         List<PartitionOffset> offsets = new ArrayList<>(size);
-        
         // put number=size element into offsets above.
         // number = size ,means all message.
         unappliedAcks.drainTo(offsets, size);
@@ -258,6 +277,28 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
                 keepConnectionAlive();
             }
         }
+    }
+    
+    public void checkPause() {
+        if (!pauseTopicPartitions.isEmpty()) {
+            kafkaConsumer.pause(pauseTopicPartitions);
+            pauseTopicPartitions.clear();
+        }
+    }
+    
+    private void checkResume() {
+        if (!resumeTopicPartitions.isEmpty()) {
+            kafkaConsumer.resume(resumeTopicPartitions);
+            resumeTopicPartitions.clear();
+        }
+    }
+    
+    public void pause(TopicPartition topicPartition) {
+        pauseTopicPartitions.add(topicPartition);
+    }
+    
+    public void resume(TopicPartition topicPartition) {
+        resumeTopicPartitions.add(topicPartition);
     }
     
     /**

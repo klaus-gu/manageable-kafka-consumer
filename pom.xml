@@ -56,6 +56,11 @@
             <artifactId>rocksdbjni</artifactId>
             <version>6.10.2</version>
         </dependency>
+    
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
 
     </dependencies>
     

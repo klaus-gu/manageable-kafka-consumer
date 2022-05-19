@@ -197,9 +197,8 @@ public class OffsetMonitor {
             lastTrackedOffset = offset;
             return true;
         }
-    
+        
         /**
-         *
          * @param offset
          * @return next offset can be ack,empty if there is no offset in next page.
          */
@@ -255,11 +254,11 @@ public class OffsetMonitor {
             return pageIndex * pageSize;
         }
         
-     
+        
         private long offsetToPage(long offset) {
             return offset / pageSize;
         }
-    
+        
         /**
          * figure out the offset of this offset in current page.
          * @param offset offset

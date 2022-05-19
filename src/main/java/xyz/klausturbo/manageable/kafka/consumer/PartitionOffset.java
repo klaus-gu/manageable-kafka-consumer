@@ -2,7 +2,6 @@ package xyz.klausturbo.manageable.kafka.consumer;
 
 /**
  * Partition Offset relation .
- *
  * @author <a href="mailto:guyue375@outlook.com">Klaus.turbo</a>
  * @program manageable-kafka-consumer
  **/

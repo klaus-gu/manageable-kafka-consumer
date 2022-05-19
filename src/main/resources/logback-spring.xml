@@ -2,14 +2,14 @@
 <configuration>
     <contextName>logback</contextName>
  
-    <property name="LOG_HOME" value="${catalina.base:-.}/manageable-kafka-consumer/logs"/>
+    <property name="LOG_HOME" value="${catalina.base:-.}/logs"/>
     
     <logger name="org.apache.kafka.clients.consumer.ConsumerConfig" level="off"/>
     
     <appender name="KAFKA_CONSUMER_LOGGER" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <append>true</append>
         <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${catalina.base:-.}/manageable-kafka-consumer/logs/kafka-consumer-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+            <fileNamePattern>${catalina.base:-.}/logs/kafka-consumer-%d{yyyy-MM-dd}.%i.log</fileNamePattern>
             <timeBasedFileNamingAndTriggeringPolicy
                 class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
                 <maxFileSize>512MB</maxFileSize>
