@@ -1,5 +1,8 @@
 package xyz.klausturbo.manageable.kafka.consumer;
 
+import com.github.benmanes.caffeine.cache.CacheLoader;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.LoadingCache;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -10,6 +13,8 @@ import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.WakeupException;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.slf4j.Logger;
 import xyz.klausturbo.manageable.kafka.util.LogUtil;
 
@@ -20,20 +25,21 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Properties;
+import java.util.Queue;
+import java.util.Random;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG;
@@ -43,9 +49,11 @@ import static org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_INTERVAL
  * @author <a href="mailto:guyue375@outlook.com">Klaus.turbo</a>
  * @program dc-log-collect
  **/
-public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
+public class TurboKafkaConsumer<K, V> implements Closeable {
     
-    private static final Logger LOGGER = LogUtil.getLogger(OffsetManageableKafkaConsumer.class);
+    private static final Logger LOGGER = LogUtil.getLogger(TurboKafkaConsumer.class);
+    
+    private static final String KEY = "topic_partition_key_";
     
     private static final int POLL_TIMEOUT_MILLIS = 100;
     
@@ -54,6 +62,14 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
     private final Thread thread;
     
     private final OffsetMonitor offsetMonitor;
+    
+    private final LoadingCache<String, TopicPartition> partitionLoadingCache = Caffeine.newBuilder()
+            .expireAfterWrite(2000, TimeUnit.MILLISECONDS).build(new CacheLoader<String, TopicPartition>() {
+                @Override
+                public @Nullable TopicPartition load(@NonNull String s) throws Exception {
+                    return null;
+                }
+            });
     
     /**
      * The queued records before delivering to the client, are kept here.
@@ -71,6 +87,10 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
     
     private final List<TopicPartition> assignedPartitions;
     
+    private final Map<Integer, PartitionConsumeWorker<K, V>> partitionWorkers = new HashMap<>();
+    
+    private final int maxQueuedRecords;
+    
     private int maxPollIntervalMillis = 300000;
     
     private long lastPollTime;
@@ -79,17 +99,15 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
     
     private String topic;
     
+    private Queue<Integer> partitionResumeWaitQueue = new LinkedBlockingQueue<>(1000);
+    
     private volatile boolean stop = false;
     
-    private volatile List<TopicPartition> pauseTopicPartitions = new LinkedList<>();
-    
-    private volatile List<TopicPartition> resumeTopicPartitions = new LinkedList<>();
-    
-    protected OffsetManageableKafkaConsumer(Properties kafkaConsumerProperties) {
+    public TurboKafkaConsumer(Properties kafkaConsumerProperties) {
         this(kafkaConsumerProperties, 10_000, 1000, 10_000);
     }
     
-    protected OffsetManageableKafkaConsumer(Properties kafkaConsumerProperties, int offsetMonitorPageSize,
+    public TurboKafkaConsumer(Properties kafkaConsumerProperties, int offsetMonitorPageSize,
             int offsetMonitorMaxOpenPagesPerPartition, int maxQueuedRecords) {
         if (kafkaConsumerProperties.containsKey(MAX_POLL_INTERVAL_MS_CONFIG)) {
             maxPollIntervalMillis = Integer.parseInt(kafkaConsumerProperties.getProperty(MAX_POLL_INTERVAL_MS_CONFIG));
@@ -97,13 +115,11 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
             kafkaConsumerProperties.put(MAX_POLL_INTERVAL_MS_CONFIG, maxPollIntervalMillis);
         }
         kafkaConsumerProperties.put(ENABLE_AUTO_COMMIT_CONFIG, "false");
+        this.maxQueuedRecords = maxQueuedRecords;
         this.kafkaConsumer = new KafkaConsumer<>(kafkaConsumerProperties);
-        // 初始化这个 consumer 最多缓存的 record 条数
         this.queuedRecords = new ArrayBlockingQueue<>(maxQueuedRecords);
-        
         this.thread = initConsumerThread();
         this.offsetMonitor = new OffsetMonitor(offsetMonitorPageSize, offsetMonitorMaxOpenPagesPerPartition);
-        
         offsetCommitCallback = (offsets, e) -> {
             if (e != null) {
                 LOGGER.error("Failed to commit offset. It is valid just if Kafka is out of reach "
@@ -141,12 +157,12 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
         };
     }
     
-    protected OffsetManageableKafkaConsumer<K, V> subscribe(String topic) {
+    public TurboKafkaConsumer<K, V> subscribe(String topic) {
         subscribe(topic, null);
         return this;
     }
     
-    protected OffsetManageableKafkaConsumer<K, V> subscribe(String topic, ConsumerRebalanceListener rebalanceListener) {
+    public TurboKafkaConsumer<K, V> subscribe(String topic, ConsumerRebalanceListener rebalanceListener) {
         this.rebalanceListener = rebalanceListener;
         kafkaConsumer.subscribe(Collections.singleton(topic), internalRebalanceListener);
         this.topic = topic;
@@ -154,9 +170,24 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
         return this;
     }
     
-    public OffsetManageableKafkaConsumer<K, V> assign(String topic, List<Integer> partitions) {
+    public TurboKafkaConsumer<K, V> assign(String topic, List<Integer> partitions) {
         List<TopicPartition> topicPartitions = new ArrayList<>();
-        partitions.forEach(p -> topicPartitions.add(new TopicPartition(topic, p)));
+        partitions.forEach(p -> {
+            TopicPartition topicPartition = new TopicPartition(topic, p);
+            topicPartitions.add(topicPartition);
+            PartitionConsumeWorker<K, V> partitionConsumeWorker = new PartitionConsumeWorker<K, V>(topicPartition, this,
+                    r -> {
+                        try {
+                            // 模拟业务逻辑处理
+                            TimeUnit.MILLISECONDS.sleep(new Random().nextInt(100));
+                            System.out.println(Thread.currentThread().getName()+"--- 业务逻辑：" + r.partition() + " == " + r.offset() + " >>> " + r.value());
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                        return true;
+                    }, maxQueuedRecords);
+            partitionWorkers.put(topicPartition.partition(), partitionConsumeWorker);
+        });
         kafkaConsumer.assign(topicPartitions);
         thread.setName("kafka-consumer-for-" + topic);
         this.topic = topic;
@@ -170,7 +201,7 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
         unappliedAcks.add(partitionOffset);
     }
     
-    protected OffsetManageableKafkaConsumer<K, V> start() throws InterruptedException, IOException {
+    public TurboKafkaConsumer<K, V> start() throws InterruptedException, IOException {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             executor.submit(() -> {
@@ -210,21 +241,12 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
         }
     }
     
-    /**
-     * init a thread ,polling messages from kafka .
-     * <p>
-     * 1. handle offset acknowledge.
-     * <p>
-     * 2. put message into inner queue <queuedRecords>.
-     * @return
-     */
     private Thread initConsumerThread() {
         return new Thread(() -> {
             while (!stop) {
                 try {
-                    checkResume();
-                    checkPause();
                     handleAcks();
+                    resumePartition();
                     lastPollTime = System.currentTimeMillis();
                     putRecordsInQueue(kafkaConsumer.poll(Duration.ofMillis(POLL_TIMEOUT_MILLIS)));
                 } catch (WakeupException | InterruptException | InterruptedException e) {
@@ -236,6 +258,14 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
                 }
             }
         });
+    }
+    
+    private void resumePartition() {
+        Integer partitionId = partitionResumeWaitQueue.poll();
+        if (partitionId != null) {
+            LOGGER.info("【RESUME】Partition[{}] will be resumed .", partitionId);
+            kafkaConsumer.resume(Collections.singletonList(new TopicPartition(topic, partitionId)));
+        }
     }
     
     private void handleAcks() {
@@ -261,6 +291,7 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
     }
     
     private void putRecordsInQueue(ConsumerRecords<K, V> records) throws InterruptedException {
+        // 先全部标记 records
         for (ConsumerRecord<K, V> record : records) {
             while (!offsetMonitor.track(record.partition(), record.offset())) {
                 LOGGER.warn("Offset monitor for partition " + record.partition() + " is full. "
@@ -270,35 +301,37 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
                 Thread.sleep(1);
                 keepConnectionAlive();
             }
-            // put message into queue first.
-            while (!queuedRecords.offer(record)) {
+            
+            PartitionConsumeWorker<K, V> worker = partitionWorkers.get(record.partition());
+            if (!worker.offer(record)) {
                 handleAcks();
                 Thread.sleep(1);
                 keepConnectionAlive();
             }
+            if (!worker.isPaused()) {
+                LOGGER.info(
+                        "【PAUSE】Partition[{}] has been paused ，it will be resumed after worker consume all records.",
+                        record.partition());
+                worker.setPaused();
+                kafkaConsumer.pause(Collections.singletonList(new TopicPartition(record.topic(), record.partition())));
+            }
+            //            while (!queuedRecords.offer(record)) {
+            //                handleAcks();
+            //                Thread.sleep(1);
+            //                keepConnectionAlive();
+            //            }
         }
-    }
-    
-    public void checkPause() {
-        if (!pauseTopicPartitions.isEmpty()) {
-            kafkaConsumer.pause(pauseTopicPartitions);
-            pauseTopicPartitions.clear();
-        }
-    }
-    
-    private void checkResume() {
-        if (!resumeTopicPartitions.isEmpty()) {
-            kafkaConsumer.resume(resumeTopicPartitions);
-            resumeTopicPartitions.clear();
-        }
-    }
-    
-    public void pause(TopicPartition topicPartition) {
-        pauseTopicPartitions.add(topicPartition);
-    }
-    
-    public void resume(TopicPartition topicPartition) {
-        resumeTopicPartitions.add(topicPartition);
+        // 按分区分发消息，并暂停该分区的消费直到消费结束
+        //        for (Map.Entry<TopicPartition, PartitionConsumeWorker<K, V>> workerEntry : partitionWorkers.entrySet()) {
+        //            TopicPartition topicPartition = workerEntry.getKey();
+        //            PartitionConsumeWorker<K, V> worker = workerEntry.getValue();
+        //            List<ConsumerRecord<K, V>> partitionRecords = records.records(topicPartition);
+        //            worker.offer(partitionRecords);
+        //            LOGGER.info("Partition[{}] has been paused ，it will be resumed after worker consume all records.",
+        //                    topicPartition.partition());
+        //            worker.setPaused();
+        //            kafkaConsumer.pause(Collections.singletonList(topicPartition));
+        //        }
     }
     
     /**
@@ -316,6 +349,12 @@ public class OffsetManageableKafkaConsumer<K, V> implements Closeable {
             rebalanceHappened = false;
             lastPollTime = System.currentTimeMillis();
             kafkaConsumer.poll(Duration.ofMillis(0));
+        }
+    }
+    
+    protected void requestResume(Integer partitionId) {
+        if (!partitionResumeWaitQueue.contains(partitionId)) {
+            partitionResumeWaitQueue.offer(partitionId);
         }
     }
 }

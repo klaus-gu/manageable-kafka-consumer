@@ -1,5 +1,6 @@
 package xyz.klausturbo.manageable.kafka.storage;
 
+import lombok.val;
 import org.rocksdb.CompactionStyle;
 import org.rocksdb.CompressionType;
 import org.rocksdb.Options;
@@ -55,7 +56,11 @@ public class LocalOffsetStorage implements DisposableBean, ApplicationContextAwa
     public Long getPartitionLastOffset(Integer partitionId) {
         String res = null;
         try {
-            res = new String(rocksDB.get(partitionId.toString().getBytes()));
+            final byte[] bytes = rocksDB.get(partitionId.toString().getBytes());
+            if (bytes == null){
+                return null;
+            }
+            res = new String(bytes);
         } catch (RocksDBException e) {
             // todo 日志
             e.printStackTrace();
@@ -73,6 +78,14 @@ public class LocalOffsetStorage implements DisposableBean, ApplicationContextAwa
             // todo 日志
             e.printStackTrace();
         }
+    }
+    
+    public boolean isConsumedBefore(Integer partitionId, Long currentOffset) {
+        Long lastOffset = getPartitionLastOffset(partitionId);
+        if (null == lastOffset){
+            return false;
+        }
+        return currentOffset <= lastOffset;
     }
     
     @Override

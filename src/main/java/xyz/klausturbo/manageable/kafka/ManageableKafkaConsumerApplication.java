@@ -3,9 +3,11 @@ package xyz.klausturbo.manageable.kafka;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import xyz.klausturbo.manageable.kafka.consumer.ConsumerRunner;
+import xyz.klausturbo.manageable.kafka.consumer.TurboKafkaConsumer;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
 
 /**
@@ -33,9 +35,11 @@ public class ManageableKafkaConsumerApplication {
                 "org.apache.kafka.common.serialization.StringDeserializer");
         properties.put(ConsumerConfig.GROUP_ID_CONFIG, GROUP_ID);
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        properties.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG,"500");
-        ConsumerRunner<String,String> runner = new ConsumerRunner<>(properties, 1,1,5000);
-        runner.run(TOPIC);
+        properties.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG,"5000");
+        TurboKafkaConsumer<String,String> runner = new TurboKafkaConsumer<>(properties, 10,10,5000);
+        List<Integer> partitions = Arrays.asList(new Integer[] {0, 1, 2, 3, 4, 5, 6, 7});
+        runner.assign(TOPIC,partitions);
+        runner.start();
     }
     
 }

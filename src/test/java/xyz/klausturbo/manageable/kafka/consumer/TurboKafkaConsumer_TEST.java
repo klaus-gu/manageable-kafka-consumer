@@ -12,11 +12,11 @@ import java.util.Map;
 import java.util.Properties;
 
 /**
- * ${@link OffsetManageableKafkaConsumer} .
+ * ${@link TurboKafkaConsumer} .
  * @author <a href="mailto:guyue375@outlook.com">Klaus.turbo</a>
  * @program manageable-kafka-consumer
  **/
-public class OffsetManageableKafkaConsumer_TEST {
+public class TurboKafkaConsumer_TEST {
     
     private static final String BROKERS = "127.0.0.1:9092";
     
@@ -35,7 +35,7 @@ public class OffsetManageableKafkaConsumer_TEST {
                 "org.apache.kafka.common.serialization.StringDeserializer");
         properties.put(ConsumerConfig.GROUP_ID_CONFIG, GROUP_ID);
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
-        OffsetManageableKafkaConsumer<String, String> consumer = new OffsetManageableKafkaConsumer<String, String>(
+        TurboKafkaConsumer<String, String> consumer = new TurboKafkaConsumer<String, String>(
                 properties, 10, 1000, 5000);
         consumer.subscribe(TOPIC);
         consumer.start();
