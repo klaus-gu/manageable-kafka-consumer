@@ -14,14 +14,14 @@ public class LocalStorage_TEST {
     @Test
     public void Storage_TEST() throws RocksDBException {
         LocalOffsetStorage storage = new LocalOffsetStorage();
-        storage.putPartitionLastOffset(1,9809L);
-        Assert.assertEquals(java.util.Optional.of(9809L).get(),storage.getPartitionLastOffset(1));
+        storage.putPartitionLastOffset("",9809L);
+        Assert.assertEquals(java.util.Optional.of(9809L).get(),storage.getPartitionLastOffset(""));
     }
     
     @Test
     public void getBeforeOffset_TEST() throws RocksDBException {
         LocalOffsetStorage storage = new LocalOffsetStorage();
-        System.out.println(storage.getPartitionLastOffset(0));
+        System.out.println(storage.getPartitionLastOffset("0"));
 //        Assert.assertEquals(java.util.Optional.of(9809L).get(),storage.getPartitionLastOffset(0));
     }
 }

@@ -26,6 +26,7 @@ public class ManageableKafkaConsumerApplication {
     
     public static void main(String[] args) throws IOException, InterruptedException {
         SpringApplication.run(ManageableKafkaConsumerApplication.class, args);
+        
         Properties properties = new Properties();
         properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BROKERS);
         properties.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, "1000");

@@ -53,10 +53,10 @@ public class LocalOffsetStorage implements DisposableBean, ApplicationContextAwa
         return applicationContext.getBeanProvider(LocalOffsetStorage.class).getIfAvailable();
     }
     
-    public Long getPartitionLastOffset(Integer partitionId) {
+    public Long getPartitionLastOffset(String topicPartition) {
         String res = null;
         try {
-            final byte[] bytes = rocksDB.get(partitionId.toString().getBytes());
+            final byte[] bytes = rocksDB.get(topicPartition.getBytes());
             if (bytes == null){
                 return null;
             }
@@ -71,17 +71,17 @@ public class LocalOffsetStorage implements DisposableBean, ApplicationContextAwa
         return null;
     }
     
-    public void putPartitionLastOffset(Integer partitionId, Long offset) {
+    public void putPartitionLastOffset(String topicPartition, Long offset) {
         try {
-            rocksDB.put(partitionId.toString().getBytes(), offset.toString().getBytes());
+            rocksDB.put(topicPartition.getBytes(), offset.toString().getBytes());
         } catch (RocksDBException e) {
             // todo 日志
             e.printStackTrace();
         }
     }
     
-    public boolean isConsumedBefore(Integer partitionId, Long currentOffset) {
-        Long lastOffset = getPartitionLastOffset(partitionId);
+    public boolean isConsumedBefore(String topicPartition, Long currentOffset) {
+        Long lastOffset = getPartitionLastOffset(topicPartition);
         if (null == lastOffset){
             return false;
         }

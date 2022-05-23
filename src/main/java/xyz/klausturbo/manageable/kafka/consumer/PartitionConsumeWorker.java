@@ -2,13 +2,11 @@ package xyz.klausturbo.manageable.kafka.consumer;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.TopicPartition;
-import org.slf4j.Logger;
 import xyz.klausturbo.manageable.kafka.storage.LocalOffsetStorage;
 import xyz.klausturbo.manageable.kafka.util.LogUtil;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -21,8 +19,6 @@ import java.util.function.Predicate;
  * @program manageable-kafka-consumer
  **/
 public class PartitionConsumeWorker<K, V> implements Closeable {
-    
-    private static final Logger LOGGER = LogUtil.getLogger(PartitionConsumeWorker.class);
     
     private final BlockingQueue<ConsumerRecord<K, V>> partitionQueue;
     
@@ -58,9 +54,9 @@ public class PartitionConsumeWorker<K, V> implements Closeable {
         this.isRunning = true;
         this.handleFunc = func;
         this.thread = new Thread(this::run);
-        this.thread.setName("kafka-partition-worker-for-" + topicPartition.partition());
+        this.thread.setName("PartitionWorker-" + topicPartition.partition());
         this.thread.start();
-        LOGGER.info("Start a worker[{}] for partition[{}].", thread.getName(), topicPartition.partition());
+        LogUtil.PARTITION_WORKER.info("Start a worker[{}] for partition[{}].", thread.getName(), topicPartition.partition());
     }
     
     /**
@@ -69,9 +65,9 @@ public class PartitionConsumeWorker<K, V> implements Closeable {
      * @param func
      */
     private void consume(ConsumerRecord<K, V> consumerRecord, Predicate<ConsumerRecord<K, V>> func) {
-        if (!LocalOffsetStorage.getDB().isConsumedBefore(consumerRecord.partition(), consumerRecord.offset()) && func.test(consumerRecord)) {
+        if (!LocalOffsetStorage.getDB().isConsumedBefore(consumerRecord.topic()+consumerRecord.partition(), consumerRecord.offset()) && func.test(consumerRecord)) {
             // 记录本次消息处理的位置，防止在消息被消费并且未提交offset的时候崩溃，在恢复的时候重复消费
-            LocalOffsetStorage.getDB().putPartitionLastOffset(topicPartition.partition(), consumerRecord.offset());
+            LocalOffsetStorage.getDB().putPartitionLastOffset(topicPartition.topic()+topicPartition.partition(), consumerRecord.offset());
         }
         PartitionOffset partitionOffset = new PartitionOffset(topicPartition.partition(), consumerRecord.offset());
         kafkaConsumer.ack(partitionOffset);
@@ -79,10 +75,6 @@ public class PartitionConsumeWorker<K, V> implements Closeable {
     
     public boolean offer(ConsumerRecord<K, V> consumerRecord) {
         return partitionQueue.offer(consumerRecord);
-    }
-    
-    public void offer(List<ConsumerRecord<K, V>> consumerRecords) {
-        consumerRecords.forEach(this::offer);
     }
     
     private void run() {
@@ -102,7 +94,7 @@ public class PartitionConsumeWorker<K, V> implements Closeable {
                 }
             }
         } catch (InterruptedException e) {
-        
+        LogUtil.TURBO_KAFKA_CONSUMER.error("[run()]:{}.",e.getMessage());
         }
     }
     

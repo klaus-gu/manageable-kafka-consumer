@@ -51,8 +51,6 @@ import static org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_INTERVAL
  **/
 public class TurboKafkaConsumer<K, V> implements Closeable {
     
-    private static final Logger LOGGER = LogUtil.getLogger(TurboKafkaConsumer.class);
-    
     private static final String KEY = "topic_partition_key_";
     
     private static final int POLL_TIMEOUT_MILLIS = 100;
@@ -122,10 +120,10 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
         this.offsetMonitor = new OffsetMonitor(offsetMonitorPageSize, offsetMonitorMaxOpenPagesPerPartition);
         offsetCommitCallback = (offsets, e) -> {
             if (e != null) {
-                LOGGER.error("Failed to commit offset. It is valid just if Kafka is out of reach "
+                LogUtil.TURBO_KAFKA_CONSUMER.error("Failed to commit offset. It is valid just if Kafka is out of reach "
                         + "or it was in a re-balance process recently." + e);
             } else {
-                LOGGER.info("[Offsets committed: {}].", offsets);
+                LogUtil.TURBO_KAFKA_CONSUMER.info("[Offsets committed: {}].", offsets);
             }
         };
         
@@ -137,7 +135,7 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
             @Override
             public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
                 if (!partitions.isEmpty()) {
-                    LOGGER.info("Kafka consumer previous assignment revoked:" + partitions);
+                    LogUtil.TURBO_KAFKA_CONSUMER.info("Kafka consumer previous assignment revoked:" + partitions);
                 }
                 if (rebalanceListener != null) {
                     rebalanceListener.onPartitionsRevoked(partitions);
@@ -148,13 +146,15 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
             public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
                 assignedPartitions.clear();
                 assignedPartitions.addAll(partitions);
-                LOGGER.info("Kafka consumer partitions assigned: " + partitions);
+                LogUtil.TURBO_KAFKA_CONSUMER.info("Kafka consumer partitions assigned: " + partitions);
                 offsetMonitor.reset();
                 if (rebalanceListener != null) {
                     rebalanceListener.onPartitionsAssigned(partitions);
                 }
             }
+            
         };
+        LogUtil.TURBO_KAFKA_CONSUMER.info("Init one kafkaConsumer.Properties:{}.",kafkaConsumerProperties.toString());
     }
     
     public TurboKafkaConsumer<K, V> subscribe(String topic) {
@@ -166,7 +166,7 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
         this.rebalanceListener = rebalanceListener;
         kafkaConsumer.subscribe(Collections.singleton(topic), internalRebalanceListener);
         this.topic = topic;
-        thread.setName("kafka-consumer-for-" + topic);
+        thread.setName("TurboKafkaConsumer-" + topic);
         return this;
     }
     
@@ -189,7 +189,7 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
             partitionWorkers.put(topicPartition.partition(), partitionConsumeWorker);
         });
         kafkaConsumer.assign(topicPartitions);
-        thread.setName("kafka-consumer-for-" + topic);
+        thread.setName("TurboKafkaConsumer-" + topic);
         this.topic = topic;
         return this;
     }
@@ -253,7 +253,7 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
                     if (!stop) {
                         throw new IllegalStateException("Unexpected interrupt.");
                     }
-                    LOGGER.error(Thread.currentThread().getName() + " interrupted.");
+                    LogUtil.TURBO_KAFKA_CONSUMER.error(Thread.currentThread().getName() + " interrupted.");
                     return;
                 }
             }
@@ -263,7 +263,7 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
     private void resumePartition() {
         Integer partitionId = partitionResumeWaitQueue.poll();
         if (partitionId != null) {
-            LOGGER.info("【RESUME】Partition[{}] will be resumed .", partitionId);
+            LogUtil.TURBO_KAFKA_CONSUMER.info("【RESUME】Partition[{}] will be resumed .", partitionId);
             kafkaConsumer.resume(Collections.singletonList(new TopicPartition(topic, partitionId)));
         }
     }
@@ -294,7 +294,7 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
         // 先全部标记 records
         for (ConsumerRecord<K, V> record : records) {
             while (!offsetMonitor.track(record.partition(), record.offset())) {
-                LOGGER.warn("Offset monitor for partition " + record.partition() + " is full. "
+                LogUtil.TURBO_KAFKA_CONSUMER.warn("Offset monitor for partition " + record.partition() + " is full. "
                         + "Waiting... [You should never see this message. Consider increasing "
                         + "the max number of open pages]");
                 handleAcks();
@@ -309,7 +309,7 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
                 keepConnectionAlive();
             }
             if (!worker.isPaused()) {
-                LOGGER.info(
+                LogUtil.TURBO_KAFKA_CONSUMER.info(
                         "【PAUSE】Partition[{}] has been paused ，it will be resumed after worker consume all records.",
                         record.partition());
                 worker.setPaused();

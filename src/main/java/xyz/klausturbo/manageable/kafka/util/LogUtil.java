@@ -10,10 +10,13 @@ import org.slf4j.LoggerFactory;
  * @program manageable-kafka-consumer
  **/
 public class LogUtil {
-    public static final Logger KAFKA_CONSUMER_LOGGER;
+    
+    public static final Logger TURBO_KAFKA_CONSUMER;
+    public static final Logger PARTITION_WORKER;
     
     static {
-        KAFKA_CONSUMER_LOGGER = LoggerFactory.getLogger("manageable.kafka.consumer.running-log");
+        TURBO_KAFKA_CONSUMER = LoggerFactory.getLogger("turboKafkaConsumer");
+        PARTITION_WORKER=LoggerFactory.getLogger("partitionWorker");
     }
     
     public static Logger getLogger(Class<?> clazz) {
