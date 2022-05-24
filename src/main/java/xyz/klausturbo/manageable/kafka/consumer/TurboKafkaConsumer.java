@@ -15,7 +15,6 @@ import org.apache.kafka.common.errors.InterruptException;
 import org.apache.kafka.common.errors.WakeupException;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.checkerframework.checker.nullness.qual.Nullable;
-import org.slf4j.Logger;
 import xyz.klausturbo.manageable.kafka.util.LogUtil;
 
 import java.io.Closeable;
@@ -39,6 +38,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG;
@@ -50,8 +50,6 @@ import static org.apache.kafka.clients.consumer.ConsumerConfig.MAX_POLL_INTERVAL
  * @program dc-log-collect
  **/
 public class TurboKafkaConsumer<K, V> implements Closeable {
-    
-    private static final String KEY = "topic_partition_key_";
     
     private static final int POLL_TIMEOUT_MILLIS = 100;
     
@@ -154,38 +152,29 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
             }
             
         };
-        LogUtil.TURBO_KAFKA_CONSUMER.info("Init one kafkaConsumer.Properties:{}.",kafkaConsumerProperties.toString());
+        LogUtil.TURBO_KAFKA_CONSUMER.info("Init one kafkaConsumer.Properties:{}.", kafkaConsumerProperties.toString());
     }
     
-    public TurboKafkaConsumer<K, V> subscribe(String topic) {
-        subscribe(topic, null);
-        return this;
-    }
+//    public TurboKafkaConsumer<K, V> subscribe(String topic) {
+//        subscribe(topic, null);
+//        return this;
+//    }
+//
+//    public TurboKafkaConsumer<K, V> subscribe(String topic, ConsumerRebalanceListener rebalanceListener) {
+//        this.rebalanceListener = rebalanceListener;
+//        kafkaConsumer.subscribe(Collections.singleton(topic), internalRebalanceListener);
+//        this.topic = topic;
+//        thread.setName("TurboKafkaConsumer-" + topic);
+//        return this;
+//    }
     
-    public TurboKafkaConsumer<K, V> subscribe(String topic, ConsumerRebalanceListener rebalanceListener) {
-        this.rebalanceListener = rebalanceListener;
-        kafkaConsumer.subscribe(Collections.singleton(topic), internalRebalanceListener);
-        this.topic = topic;
-        thread.setName("TurboKafkaConsumer-" + topic);
-        return this;
-    }
-    
-    public TurboKafkaConsumer<K, V> assign(String topic, List<Integer> partitions) {
+    public TurboKafkaConsumer<K, V> assign(String topic, List<Integer> partitions, Predicate<ConsumerRecord<K,V>> func) {
         List<TopicPartition> topicPartitions = new ArrayList<>();
         partitions.forEach(p -> {
             TopicPartition topicPartition = new TopicPartition(topic, p);
             topicPartitions.add(topicPartition);
-            PartitionConsumeWorker<K, V> partitionConsumeWorker = new PartitionConsumeWorker<K, V>(topicPartition, this,
-                    r -> {
-                        try {
-                            // 模拟业务逻辑处理
-                            TimeUnit.MILLISECONDS.sleep(new Random().nextInt(100));
-                            System.out.println(Thread.currentThread().getName()+"--- 业务逻辑：" + r.partition() + " == " + r.offset() + " >>> " + r.value());
-                        } catch (InterruptedException e) {
-                            e.printStackTrace();
-                        }
-                        return true;
-                    }, maxQueuedRecords);
+            PartitionConsumeWorker<K, V> partitionConsumeWorker = new PartitionConsumeWorker<K, V>(topicPartition, this,func
+                   , maxQueuedRecords);
             partitionWorkers.put(topicPartition.partition(), partitionConsumeWorker);
         });
         kafkaConsumer.assign(topicPartitions);
@@ -291,7 +280,6 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
     }
     
     private void putRecordsInQueue(ConsumerRecords<K, V> records) throws InterruptedException {
-        // 先全部标记 records
         for (ConsumerRecord<K, V> record : records) {
             while (!offsetMonitor.track(record.partition(), record.offset())) {
                 LogUtil.TURBO_KAFKA_CONSUMER.warn("Offset monitor for partition " + record.partition() + " is full. "
@@ -309,9 +297,9 @@ public class TurboKafkaConsumer<K, V> implements Closeable {
                 keepConnectionAlive();
             }
             if (!worker.isPaused()) {
-                LogUtil.TURBO_KAFKA_CONSUMER.info(
-                        "【PAUSE】Partition[{}] has been paused ，it will be resumed after worker consume all records.",
-                        record.partition());
+                LogUtil.TURBO_KAFKA_CONSUMER
+                        .info("【PAUSE】Partition[{}] has been paused ，it will be resumed after worker consume all records.",
+                                record.partition());
                 worker.setPaused();
                 kafkaConsumer.pause(Collections.singletonList(new TopicPartition(record.topic(), record.partition())));
             }

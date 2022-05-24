@@ -12,12 +12,12 @@ import java.util.Properties;
 
 /**
  * 启动类 .
- *
  * @author <a href="mailto:guyue375@outlook.com">Klaus.turbo</a>
  * @program manageable-kafka-consumer
  **/
 @SpringBootApplication
 public class ManageableKafkaConsumerApplication {
+    
     private static final String BROKERS = "47.98.217.98:19091,47.98.167.121:19091";
     
     private static final String GROUP_ID = "test-group-02";
@@ -36,10 +36,12 @@ public class ManageableKafkaConsumerApplication {
                 "org.apache.kafka.common.serialization.StringDeserializer");
         properties.put(ConsumerConfig.GROUP_ID_CONFIG, GROUP_ID);
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        properties.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG,"5000");
-        TurboKafkaConsumer<String,String> runner = new TurboKafkaConsumer<>(properties, 10,10,5000);
+        properties.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "5000");
+        TurboKafkaConsumer<String, String> runner = new TurboKafkaConsumer<>(properties, 10, 10, 5000);
         List<Integer> partitions = Arrays.asList(new Integer[] {0, 1, 2, 3, 4, 5, 6, 7});
-        runner.assign(TOPIC,partitions);
+        runner.assign(TOPIC, partitions, r -> {
+            return true;
+        });
         runner.start();
     }
     

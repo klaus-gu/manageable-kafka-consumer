@@ -22,13 +22,10 @@ public class PartitionConsumeWorker<K, V> implements Closeable {
     
     private final BlockingQueue<ConsumerRecord<K, V>> partitionQueue;
     
-    /**
-     * 分区消费者关注的分区信息
-     */
     private final TopicPartition topicPartition;
     
     /**
-     * 主要用于 ACK
+     * used for ack.
      */
     private final TurboKafkaConsumer<K, V> kafkaConsumer;
     
@@ -41,7 +38,7 @@ public class PartitionConsumeWorker<K, V> implements Closeable {
     private boolean isRunning;
     
     /**
-     * 当前Worker的分区是否被暂定消费.
+     * Record if current worker has been paused.
      */
     private AtomicBoolean isPaused = new AtomicBoolean(false);
     
@@ -56,18 +53,20 @@ public class PartitionConsumeWorker<K, V> implements Closeable {
         this.thread = new Thread(this::run);
         this.thread.setName("PartitionWorker-" + topicPartition.partition());
         this.thread.start();
-        LogUtil.PARTITION_WORKER.info("Start a worker[{}] for partition[{}].", thread.getName(), topicPartition.partition());
+        LogUtil.PARTITION_WORKER
+                .info("Start a worker[{}] for partition[{}].", thread.getName(), topicPartition.partition());
     }
     
     /**
-     * 消费消息
+     * consume message.
      * @param consumerRecord
-     * @param func
+     * @param func biz code.
      */
     private void consume(ConsumerRecord<K, V> consumerRecord, Predicate<ConsumerRecord<K, V>> func) {
-        if (!LocalOffsetStorage.getDB().isConsumedBefore(consumerRecord.topic()+consumerRecord.partition(), consumerRecord.offset()) && func.test(consumerRecord)) {
-            // 记录本次消息处理的位置，防止在消息被消费并且未提交offset的时候崩溃，在恢复的时候重复消费
-            LocalOffsetStorage.getDB().putPartitionLastOffset(topicPartition.topic()+topicPartition.partition(), consumerRecord.offset());
+        String key = consumerRecord.topic() + consumerRecord.partition();
+        if (!LocalOffsetStorage.getDB().isConsumedBefore(key, consumerRecord.offset()) && func.test(consumerRecord)) {
+            // record offset consumed this time,in case that message be consumed twice.
+            LocalOffsetStorage.getDB().putPartitionLastOffset(key, consumerRecord.offset());
         }
         PartitionOffset partitionOffset = new PartitionOffset(topicPartition.partition(), consumerRecord.offset());
         kafkaConsumer.ack(partitionOffset);
@@ -85,7 +84,7 @@ public class PartitionConsumeWorker<K, V> implements Closeable {
                 if (consumerRecord != null) {
                     consume(consumerRecord, handleFunc);
                 } else {
-                    // 防止长期没有消息导致的CPU空转.
+                    // avoid cpu idling.
                     TimeUnit.MILLISECONDS.sleep(10);
                     if (isPaused.get()) {
                         setResumed();
@@ -94,7 +93,7 @@ public class PartitionConsumeWorker<K, V> implements Closeable {
                 }
             }
         } catch (InterruptedException e) {
-        LogUtil.TURBO_KAFKA_CONSUMER.error("[run()]:{}.",e.getMessage());
+            LogUtil.TURBO_KAFKA_CONSUMER.error("[run()]:{}.", e.getMessage());
         }
     }
     
